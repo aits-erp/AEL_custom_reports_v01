@@ -10,8 +10,8 @@ def execute(filters=None):
 
 
 def get_columns():
-    return [
 
+    return [
         {"label": "Customer Name", "fieldname": "customer", "fieldtype": "Data", "width": 180},
         {"label": "Invoice Number", "fieldname": "invoice", "fieldtype": "Link", "options": "Sales Invoice", "width": 160},
 
@@ -86,7 +86,7 @@ def get_data(filters):
     if conditions:
         where_clause = " AND " + " AND ".join(conditions)
 
-    # ✅ NO .format() USED → NO % ERROR
+    # ✅ FIXED QUERY (valuation_rate removed from SII)
     query = """
         SELECT
             si.customer,
@@ -101,21 +101,75 @@ def get_data(filters):
             si.custom_job_no AS job_no,
 
             SUM(sii.base_net_amount) AS sell,
-            SUM(sii.qty * sii.valuation_rate) AS buy,
 
-            (SUM(sii.base_net_amount) - SUM(sii.qty * sii.valuation_rate)) AS gross_margin,
+            -- ✅ BUY from Stock Ledger Entry
+            SUM(
+                sii.qty * IFNULL((
+                    SELECT sle.valuation_rate
+                    FROM `tabStock Ledger Entry` sle
+                    WHERE sle.voucher_no = si.name
+                    AND sle.item_code = sii.item_code
+                    ORDER BY sle.posting_date DESC, sle.posting_time DESC
+                    LIMIT 1
+                ), 0)
+            ) AS buy,
 
+            -- Gross Margin
+            (
+                SUM(sii.base_net_amount) -
+                SUM(
+                    sii.qty * IFNULL((
+                        SELECT sle.valuation_rate
+                        FROM `tabStock Ledger Entry` sle
+                        WHERE sle.voucher_no = si.name
+                        AND sle.item_code = sii.item_code
+                        ORDER BY sle.posting_date DESC, sle.posting_time DESC
+                        LIMIT 1
+                    ), 0)
+                )
+            ) AS gross_margin,
+
+            -- Gross %
             CASE 
                 WHEN SUM(sii.base_net_amount) > 0 THEN
-                    ((SUM(sii.base_net_amount) - SUM(sii.qty * sii.valuation_rate)) 
-                    / SUM(sii.base_net_amount)) * 100
+                    (
+                        (
+                            SUM(sii.base_net_amount) -
+                            SUM(
+                                sii.qty * IFNULL((
+                                    SELECT sle.valuation_rate
+                                    FROM `tabStock Ledger Entry` sle
+                                    WHERE sle.voucher_no = si.name
+                                    AND sle.item_code = sii.item_code
+                                    ORDER BY sle.posting_date DESC, sle.posting_time DESC
+                                    LIMIT 1
+                                ), 0)
+                            )
+                        ) / SUM(sii.base_net_amount)
+                    ) * 100
                 ELSE 0
             END AS gross_percentage,
 
+            -- Commission
             (SUM(sii.base_net_amount) * 0.02) AS commission,
 
-            ((SUM(sii.base_net_amount) - SUM(sii.qty * sii.valuation_rate)) 
-            - (SUM(sii.base_net_amount) * 0.02)) AS net_margin
+            -- Net Margin
+            (
+                (
+                    SUM(sii.base_net_amount) -
+                    SUM(
+                        sii.qty * IFNULL((
+                            SELECT sle.valuation_rate
+                            FROM `tabStock Ledger Entry` sle
+                            WHERE sle.voucher_no = si.name
+                            AND sle.item_code = sii.item_code
+                            ORDER BY sle.posting_date DESC, sle.posting_time DESC
+                            LIMIT 1
+                        ), 0)
+                    )
+                )
+                - (SUM(sii.base_net_amount) * 0.02)
+            ) AS net_margin
 
         FROM `tabSales Invoice` si
 
