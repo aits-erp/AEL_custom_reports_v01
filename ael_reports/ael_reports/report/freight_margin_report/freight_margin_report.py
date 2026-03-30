@@ -78,7 +78,6 @@ def get_data(filters):
     else:
         conditions.append("IFNULL(si.is_return, 0) = 0")
 
-    # Include returned toggle
     if not filters.get("include_returned"):
         conditions.append("IFNULL(si.is_return, 0) = 0")
 
@@ -86,7 +85,6 @@ def get_data(filters):
     if conditions:
         where_clause = " AND " + " AND ".join(conditions)
 
-    # ✅ FIXED QUERY (valuation_rate removed from SII)
     query = """
         SELECT
             si.customer,
@@ -102,7 +100,6 @@ def get_data(filters):
 
             SUM(sii.base_net_amount) AS sell,
 
-            -- ✅ BUY from Stock Ledger Entry
             SUM(
                 sii.qty * IFNULL((
                     SELECT sle.valuation_rate
@@ -114,7 +111,6 @@ def get_data(filters):
                 ), 0)
             ) AS buy,
 
-            -- Gross Margin
             (
                 SUM(sii.base_net_amount) -
                 SUM(
@@ -129,7 +125,6 @@ def get_data(filters):
                 )
             ) AS gross_margin,
 
-            -- Gross %
             CASE 
                 WHEN SUM(sii.base_net_amount) > 0 THEN
                     (
@@ -150,10 +145,8 @@ def get_data(filters):
                 ELSE 0
             END AS gross_percentage,
 
-            -- Commission
             (SUM(sii.base_net_amount) * 0.02) AS commission,
 
-            -- Net Margin
             (
                 (
                     SUM(sii.base_net_amount) -
