@@ -456,8 +456,9 @@ def execute(filters=None):
 
 def get_columns():
     return [
-        {"label": "Customer Name",       "fieldname": "customer",           "fieldtype": "Data",     "width": 180},
+        # invoice is now FIRST — tree expand arrow will appear here
         {"label": "Invoice Number",      "fieldname": "invoice",            "fieldtype": "Link",     "options": "Sales Invoice", "width": 160},
+        {"label": "Customer Name",       "fieldname": "customer",           "fieldtype": "Data",     "width": 180},
 
         {"label": "Sales Order",         "fieldname": "sales_order",        "fieldtype": "Link",     "options": "Sales Order",     "width": 150},
         {"label": "Purchase Order",      "fieldname": "purchase_order",     "fieldtype": "Link",     "options": "Purchase Order",  "width": 150},
@@ -541,8 +542,8 @@ def get_data(filters):
 
     query = f"""
         SELECT
-            si.customer,
             si.name                          AS invoice,
+            si.customer,
 
             so_ref.sales_order               AS sales_order,
             po_ref.purchase_order            AS purchase_order,
@@ -651,10 +652,10 @@ def get_data(filters):
         for itm in item_map.get(inv.invoice, []):
             child = {
                 "indent":             1,
-                # first column gets item name — Frappe tree arrow always on col 1
-                "customer":           itm.item_name or itm.item_code,
-                # invoice is a Link field — must stay blank on child rows
-                "invoice":            "",
+                # first column is now invoice — put item name here
+                # so it appears indented under the invoice number
+                "invoice":            itm.item_name or itm.item_code,
+                "customer":           "",
                 "sales_order":        "",
                 "purchase_order":     "",
                 "purchase_invoice":   "",
