@@ -410,7 +410,6 @@ frappe.query_reports["Freight Margin Report"] = {
     formatter: function (value, row, column, data, default_formatter) {
         value = default_formatter(value, row, column, data);
 
-        // ── Columns that must be BLANK on child rows (before BUY) ────────
         const BLANK_ON_CHILD = new Set([
             "customer",
             "sales_order",
@@ -424,28 +423,23 @@ frappe.query_reports["Freight Margin Report"] = {
             "job_no"
         ]);
 
-        // ── Child rows (indent === 1) ──────────────────────────────────────
         if (data && data.indent === 1) {
 
-            // "invoice" column → show item name as plain muted text, no link
             if (column.fieldname === "invoice") {
                 return `<span style="color:var(--text-muted);font-size:0.92em;padding-left:4px;">
                             ${data.invoice || ""}
                         </span>`;
             }
 
-            // All columns BEFORE buy → completely empty
             if (BLANK_ON_CHILD.has(column.fieldname)) {
                 return "";
             }
 
-            // BUY and onwards → show value, muted style
             return `<span style="color:var(--text-muted);font-size:0.92em;">
                         ${value || ""}
                     </span>`;
         }
 
-        // ── Parent rows (invoice level) ───────────────────────────────────
         if (column.fieldname === "invoice" && data && data.invoice) {
             return `<a href="/app/sales-invoice/${encodeURIComponent(data.invoice)}"
                        style="font-weight:500;"
