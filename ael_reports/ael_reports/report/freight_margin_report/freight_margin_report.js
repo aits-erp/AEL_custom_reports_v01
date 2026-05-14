@@ -337,9 +337,9 @@
 //     }
 // };
 
-frappe.query_reports["Freight Margin Report"] = {
+frappe.query_reports["Freight Margin Report"] = { 
 
-    filters: [
+    filters: [ 
         {
             fieldname: "company",
             label: "Company",
@@ -472,8 +472,9 @@ frappe.query_reports["Freight Margin Report"] = {
         return value;
     },
 
-    get_datatable_options: function (options) {
-        options.treeView = true;
-        return options;
-    }
-};
+         get_datatable_options: function (options) {
+            options.treeView = true;
+            options.initialDepth = 0;
+            return options;
+        }
+    };
