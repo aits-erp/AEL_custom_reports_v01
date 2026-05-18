@@ -812,12 +812,65 @@ def _execute(filters, additional_table_columns=None):
 	return columns, res, None, None, None, include_payments
 
 
+# def get_gst_tax_map_bulk(invoice_names):
+# 	"""
+# 	Fetch GST amounts for all invoices at once using
+# 	igst_amount, cgst_amount, sgst_amount fields from Sales Invoice Item.
+# 	Returns a dict: { invoice_name: { cgst_2_5, sgst_2_5, igst_5, cgst_9, sgst_9, igst_18 } }
+# 	"""
+# 	if not invoice_names:
+# 		return {}
+
+# 	tax_rows = frappe.db.sql(
+# 		"""
+# 		SELECT
+# 			parent,
+# 			tax_rate,
+# 			SUM(cgst_amount) as cgst_amount,
+# 			SUM(sgst_amount) as sgst_amount,
+# 			SUM(igst_amount) as igst_amount
+# 		FROM `tabSales Invoice Item`
+# 		WHERE parent IN ({})
+# 		GROUP BY parent, tax_rate
+# 		""".format(", ".join(["%s"] * len(invoice_names))),
+# 		tuple(invoice_names),
+# 		as_dict=1,
+# 	)
+
+# 	gst_map_all = {}
+
+# 	for t in tax_rows:
+# 		inv_name = t.parent
+# 		rate = flt(t.tax_rate)
+
+# 		if inv_name not in gst_map_all:
+# 			gst_map_all[inv_name] = {
+# 				"cgst_2_5": 0.0,
+# 				"sgst_2_5": 0.0,
+# 				"igst_5":   0.0,
+# 				"cgst_9":   0.0,
+# 				"sgst_9":   0.0,
+# 				"igst_18":  0.0,
+# 			}
+
+# 		if rate == 5.0:
+# 			gst_map_all[inv_name]["cgst_2_5"] += flt(t.cgst_amount)
+# 			gst_map_all[inv_name]["sgst_2_5"] += flt(t.sgst_amount)
+# 			gst_map_all[inv_name]["igst_5"]   += flt(t.igst_amount)
+# 		elif rate == 18.0:
+# 			gst_map_all[inv_name]["cgst_9"]  += flt(t.cgst_amount)
+# 			gst_map_all[inv_name]["sgst_9"]  += flt(t.sgst_amount)
+# 			gst_map_all[inv_name]["igst_18"] += flt(t.igst_amount)
+
+# 	return gst_map_all
+
 def get_gst_tax_map_bulk(invoice_names):
 	"""
-	Fetch GST amounts for all invoices at once using
-	igst_amount, cgst_amount, sgst_amount fields from Sales Invoice Item.
-	Returns a dict: { invoice_name: { cgst_2_5, sgst_2_5, igst_5, cgst_9, sgst_9, igst_18 } }
+	Fetch GST amounts for all invoices using
+	cgst_rate, sgst_rate, igst_rate
+	and corresponding amount fields.
 	"""
+
 	if not invoice_names:
 		return {}
 
@@ -825,13 +878,52 @@ def get_gst_tax_map_bulk(invoice_names):
 		"""
 		SELECT
 			parent,
-			tax_rate,
-			SUM(cgst_amount) as cgst_amount,
-			SUM(sgst_amount) as sgst_amount,
-			SUM(igst_amount) as igst_amount
+
+			SUM(
+				CASE
+					WHEN cgst_rate = 2.5 THEN cgst_amount
+					ELSE 0
+				END
+			) AS cgst_2_5,
+
+			SUM(
+				CASE
+					WHEN sgst_rate = 2.5 THEN sgst_amount
+					ELSE 0
+				END
+			) AS sgst_2_5,
+
+			SUM(
+				CASE
+					WHEN igst_rate = 5 THEN igst_amount
+					ELSE 0
+				END
+			) AS igst_5,
+
+			SUM(
+				CASE
+					WHEN cgst_rate = 9 THEN cgst_amount
+					ELSE 0
+				END
+			) AS cgst_9,
+
+			SUM(
+				CASE
+					WHEN sgst_rate = 9 THEN sgst_amount
+					ELSE 0
+				END
+			) AS sgst_9,
+
+			SUM(
+				CASE
+					WHEN igst_rate = 18 THEN igst_amount
+					ELSE 0
+				END
+			) AS igst_18
+
 		FROM `tabSales Invoice Item`
 		WHERE parent IN ({})
-		GROUP BY parent, tax_rate
+		GROUP BY parent
 		""".format(", ".join(["%s"] * len(invoice_names))),
 		tuple(invoice_names),
 		as_dict=1,
@@ -840,27 +932,14 @@ def get_gst_tax_map_bulk(invoice_names):
 	gst_map_all = {}
 
 	for t in tax_rows:
-		inv_name = t.parent
-		rate = flt(t.tax_rate)
-
-		if inv_name not in gst_map_all:
-			gst_map_all[inv_name] = {
-				"cgst_2_5": 0.0,
-				"sgst_2_5": 0.0,
-				"igst_5":   0.0,
-				"cgst_9":   0.0,
-				"sgst_9":   0.0,
-				"igst_18":  0.0,
-			}
-
-		if rate == 5.0:
-			gst_map_all[inv_name]["cgst_2_5"] += flt(t.cgst_amount)
-			gst_map_all[inv_name]["sgst_2_5"] += flt(t.sgst_amount)
-			gst_map_all[inv_name]["igst_5"]   += flt(t.igst_amount)
-		elif rate == 18.0:
-			gst_map_all[inv_name]["cgst_9"]  += flt(t.cgst_amount)
-			gst_map_all[inv_name]["sgst_9"]  += flt(t.sgst_amount)
-			gst_map_all[inv_name]["igst_18"] += flt(t.igst_amount)
+		gst_map_all[t.parent] = {
+			"cgst_2_5": flt(t.cgst_2_5),
+			"sgst_2_5": flt(t.sgst_2_5),
+			"igst_5": flt(t.igst_5),
+			"cgst_9": flt(t.cgst_9),
+			"sgst_9": flt(t.sgst_9),
+			"igst_18": flt(t.igst_18),
+		}
 
 	return gst_map_all
 
