@@ -180,7 +180,7 @@ frappe.query_reports["Freight Margin Report"] = {
             label: "Total Amount",
             fieldtype: "Select",
             options: ["Invoice Based", "Total Based"],
-            default: "Invoice Based"
+            default: "Total Based"
         },
         {
             fieldname: "customer",
@@ -259,7 +259,7 @@ frappe.query_reports["Freight Margin Report"] = {
                        onclick="event.stopPropagation()">
                        ${data.invoice}
                    </a>`;
-        }
+        }9898
 
         if (column.fieldname === "sales_order" && data && data.sales_order) {
             return `<a href="/app/sales-order/${encodeURIComponent(data.sales_order)}"
