@@ -451,10 +451,6 @@
 
 
 
-
-
-
-
 # Copyright (c) 2026, Sukku
 
 import frappe
@@ -536,7 +532,6 @@ def get_data(filters):
 
     where_clause = (" AND " + " AND ".join(conditions)) if conditions else ""
 
-    # BUY = Purchase Invoice grand_total linked via SO → PO → PI chain
     query = f"""
         SELECT
             si.name                          AS invoice,
@@ -556,18 +551,18 @@ def get_data(filters):
 
             SUM(sii.base_net_amount)         AS sell,
 
-            IFNULL(pi_doc.grand_total, 0)    AS buy,
+            IFNULL(pi_doc.total, 0)          AS buy,
 
             (
                 SUM(sii.base_net_amount) -
-                IFNULL(pi_doc.grand_total, 0)
+                IFNULL(pi_doc.total, 0)
             ) AS gross_margin,
 
             CASE
                 WHEN SUM(sii.base_net_amount) > 0 THEN
                     (
                         SUM(sii.base_net_amount) -
-                        IFNULL(pi_doc.grand_total, 0)
+                        IFNULL(pi_doc.total, 0)
                     ) / SUM(sii.base_net_amount) * 100
                 ELSE 0
             END AS gross_percentage,
@@ -576,7 +571,7 @@ def get_data(filters):
 
             (
                 SUM(sii.base_net_amount) -
-                IFNULL(pi_doc.grand_total, 0) -
+                IFNULL(pi_doc.total, 0) -
                 IFNULL(si.custom_commission, 0)
             ) AS net_margin
 
