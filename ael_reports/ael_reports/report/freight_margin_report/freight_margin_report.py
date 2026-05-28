@@ -759,6 +759,8 @@ def get_data(filters):
 
     where_clause = (" AND " + " AND ".join(conditions)) if conditions else ""
 
+    # ── Main query: sell and reference chain per invoice ──────────────
+    # BUY is intentionally 0 here — we calculate it per-row in Python
     query = f"""
         SELECT
             si.name                          AS invoice,
@@ -778,67 +780,7 @@ def get_data(filters):
 
             SUM(sii.base_net_amount)         AS sell,
 
-            -- ── BUY: match PI item by item_code to SI item ────────────
-            -- sum PI item amounts where item_code exists in this SI
-            IFNULL((
-                SELECT SUM(pii.amount)
-                FROM `tabPurchase Invoice Item` pii
-                WHERE pii.parent     = pi_ref.purchase_invoice
-                  AND pii.item_code IN (
-                      SELECT sii2.item_code
-                      FROM `tabSales Invoice Item` sii2
-                      WHERE sii2.parent = si.name
-                  )
-            ), 0) AS buy,
-
-            (
-                SUM(sii.base_net_amount) -
-                IFNULL((
-                    SELECT SUM(pii.amount)
-                    FROM `tabPurchase Invoice Item` pii
-                    WHERE pii.parent     = pi_ref.purchase_invoice
-                      AND pii.item_code IN (
-                          SELECT sii2.item_code
-                          FROM `tabSales Invoice Item` sii2
-                          WHERE sii2.parent = si.name
-                      )
-                ), 0)
-            ) AS gross_margin,
-
-            CASE
-                WHEN SUM(sii.base_net_amount) > 0 THEN
-                    (
-                        SUM(sii.base_net_amount) -
-                        IFNULL((
-                            SELECT SUM(pii.amount)
-                            FROM `tabPurchase Invoice Item` pii
-                            WHERE pii.parent     = pi_ref.purchase_invoice
-                              AND pii.item_code IN (
-                                  SELECT sii2.item_code
-                                  FROM `tabSales Invoice Item` sii2
-                                  WHERE sii2.parent = si.name
-                              )
-                        ), 0)
-                    ) / SUM(sii.base_net_amount) * 100
-                ELSE 0
-            END AS gross_percentage,
-
-            IFNULL(si.custom_commission, 0) AS commission,
-
-            (
-                SUM(sii.base_net_amount) -
-                IFNULL((
-                    SELECT SUM(pii.amount)
-                    FROM `tabPurchase Invoice Item` pii
-                    WHERE pii.parent     = pi_ref.purchase_invoice
-                      AND pii.item_code IN (
-                          SELECT sii2.item_code
-                          FROM `tabSales Invoice Item` sii2
-                          WHERE sii2.parent = si.name
-                      )
-                ), 0) -
-                IFNULL(si.custom_commission, 0)
-            ) AS net_margin
+            IFNULL(si.custom_commission, 0)  AS commission
 
         FROM `tabSales Invoice` si
 
@@ -877,21 +819,16 @@ def get_data(filters):
     if not invoices:
         return []
 
-    total_amount_view = filters.get("total_amount_view", "Invoice Based")
-    if total_amount_view == "Total Based":
-        for inv in invoices:
-            inv["indent"] = 0
-        return invoices
+    invoice_names   = [d.invoice         for d in invoices]
+    pi_names        = [d.purchase_invoice for d in invoices if d.purchase_invoice]
+    placeholders_si = ", ".join(["%s"] * len(invoice_names))
 
-    invoice_names = [d.invoice for d in invoices]
-    placeholders  = ", ".join(["%s"] * len(invoice_names))
-
+    # ── Fetch SI items ─────────────────────────────────────────────────
     items = frappe.db.sql(f"""
         SELECT
             sii.parent          AS invoice,
             sii.item_code,
             sii.item_name,
-            sii.description,
             sii.qty,
             sii.uom,
             sii.rate,
@@ -899,20 +836,84 @@ def get_data(filters):
             sii.item_group,
             sii.warehouse
         FROM `tabSales Invoice Item` sii
-        WHERE sii.parent IN ({placeholders})
+        WHERE sii.parent IN ({placeholders_si})
         ORDER BY sii.parent, sii.idx
     """, tuple(invoice_names), as_dict=True)
 
+    # ── Fetch PI items: one amount per (purchase_invoice, item_code) ──
+    pi_buy_map = {}   # key: (purchase_invoice, item_code) → amount
+    if pi_names:
+        placeholders_pi = ", ".join(["%s"] * len(pi_names))
+        pi_items = frappe.db.sql(f"""
+            SELECT
+                pii.parent     AS purchase_invoice,
+                pii.item_code,
+                pii.amount
+            FROM `tabPurchase Invoice Item` pii
+            WHERE pii.parent IN ({placeholders_pi})
+            ORDER BY pii.parent, pii.idx
+        """, tuple(pi_names), as_dict=True)
+
+        for pi in pi_items:
+            key = (pi.purchase_invoice, pi.item_code)
+            # if same item_code appears multiple times in PI,
+            # accumulate — but typically one row per item
+            pi_buy_map[key] = pi_buy_map.get(key, 0) + (pi.amount or 0)
+
+    # ── Build invoice → purchase_invoice lookup ────────────────────────
+    inv_to_pi = {d.invoice: d.purchase_invoice for d in invoices}
+
+    # ── Build item map grouped by invoice ─────────────────────────────
     item_map = defaultdict(list)
     for item in items:
         item_map[item.invoice].append(item)
 
+    # ── Calculate buy per invoice by summing matched PI item amounts ───
+    inv_buy_map = {}
+    for inv in invoices:
+        pi_name = inv_to_pi.get(inv.invoice)
+        if not pi_name:
+            inv_buy_map[inv.invoice] = 0
+            continue
+        total_buy = 0
+        for itm in item_map.get(inv.invoice, []):
+            key = (pi_name, itm.item_code)
+            total_buy += pi_buy_map.get(key, 0)
+        inv_buy_map[inv.invoice] = total_buy
+
+    # ── Attach buy, gross_margin, gross_percentage, net_margin ────────
+    for inv in invoices:
+        buy        = inv_buy_map.get(inv.invoice, 0)
+        sell       = inv.sell or 0
+        commission = inv.commission or 0
+
+        inv["buy"]              = buy
+        inv["gross_margin"]     = sell - buy
+        inv["gross_percentage"] = ((sell - buy) / sell * 100) if sell else 0
+        inv["net_margin"]       = sell - buy - commission
+
+    # ── Total Based: return parent rows only ───────────────────────────
+    total_amount_view = filters.get("total_amount_view", "Invoice Based")
+    if total_amount_view == "Total Based":
+        for inv in invoices:
+            inv["indent"] = 0
+        return invoices
+
+    # ── Invoice Based: expandable child item rows ──────────────────────
     result = []
     for inv in invoices:
         inv["indent"] = 0
         result.append(inv)
 
+        pi_name = inv_to_pi.get(inv.invoice)
+
         for itm in item_map.get(inv.invoice, []):
+            # per-item buy from PI matched by item_code
+            item_buy = pi_buy_map.get((pi_name, itm.item_code), 0) if pi_name else 0
+            item_sell       = itm.amount or 0
+            item_gross      = item_sell - item_buy
+            item_gross_pct  = (item_gross / item_sell * 100) if item_sell else 0
+
             child = {
                 "indent":              1,
                 "invoice":             itm.item_name or itm.item_code,
@@ -926,12 +927,13 @@ def get_data(filters):
                 "cbm":                 None,
                 "weight":              None,
                 "job_no":              "",
-                "buy":                 0,
-                "sell":                itm.amount or 0,
-                "gross_margin":        0,
-                "gross_percentage":    0,
+                # ── per item financials ────────────────────────────────
+                "buy":                 item_buy,
+                "sell":                item_sell,
+                "gross_margin":        item_gross,
+                "gross_percentage":    item_gross_pct,
                 "commission":          0,
-                "net_margin":          0,
+                "net_margin":          item_gross,
             }
             result.append(child)
 
