@@ -680,6 +680,262 @@
 
 
 
+# import frappe
+# from frappe.utils import flt
+# from collections import defaultdict
+
+
+# def execute(filters=None):
+#     columns = get_columns()
+#     data = get_data(filters or {})
+#     return columns, data
+
+
+# def get_columns():
+#     return [
+#         {"label": "Invoice Number",      "fieldname": "invoice",            "fieldtype": "Link",     "options": "Sales Invoice", "width": 160},
+#         {"label": "Customer Name",       "fieldname": "customer",           "fieldtype": "Data",     "width": 180},
+#         {"label": "Sales Order",         "fieldname": "sales_order",        "fieldtype": "Link",     "options": "Sales Order",     "width": 150},
+#         {"label": "Purchase Order",      "fieldname": "purchase_order",     "fieldtype": "Link",     "options": "Purchase Order",  "width": 150},
+#         {"label": "Purchase Invoice",    "fieldname": "purchase_invoice",   "fieldtype": "Link",     "options": "Purchase Invoice","width": 160},
+#         {"label": "Origin Country",      "fieldname": "origin_country",     "fieldtype": "Data",     "width": 140},
+#         {"label": "Destination Country", "fieldname": "destination_country","fieldtype": "Data",     "width": 160},
+#         {"label": "Mode",                "fieldname": "mode",               "fieldtype": "Data",     "width": 100},
+#         {"label": "CBM",                 "fieldname": "cbm",                "fieldtype": "Float",    "width": 100},
+#         {"label": "Weight",              "fieldname": "weight",             "fieldtype": "Float",    "width": 100},
+#         {"label": "Job No",              "fieldname": "job_no",             "fieldtype": "Data",     "width": 140},
+#         {"label": "BUY",                 "fieldname": "buy",                "fieldtype": "Currency", "width": 120},
+#         {"label": "SELL",                "fieldname": "sell",               "fieldtype": "Currency", "width": 120},
+#         {"label": "Gross Margin",        "fieldname": "gross_margin",       "fieldtype": "Currency", "width": 130},
+#         {"label": "Gross Percent",       "fieldname": "gross_percentage",   "fieldtype": "Percent",  "width": 120},
+#         {"label": "Commission",          "fieldname": "commission",         "fieldtype": "Currency", "width": 120},
+#         {"label": "Net Margin",          "fieldname": "net_margin",         "fieldtype": "Currency", "width": 130},
+#     ]
+
+
+# def get_data(filters):
+
+#     conditions = []
+#     values = {}
+
+#     if filters.get("company"):
+#         conditions.append("si.company = %(company)s")
+#         values["company"] = filters["company"]
+
+#     if filters.get("from_date"):
+#         conditions.append("si.posting_date >= %(from_date)s")
+#         values["from_date"] = filters["from_date"]
+
+#     if filters.get("to_date"):
+#         conditions.append("si.posting_date <= %(to_date)s")
+#         values["to_date"] = filters["to_date"]
+
+#     if filters.get("customer"):
+#         conditions.append("si.customer = %(customer)s")
+#         values["customer"] = filters["customer"]
+
+#     if filters.get("sales_invoice"):
+#         conditions.append("si.name = %(sales_invoice)s")
+#         values["sales_invoice"] = filters["sales_invoice"]
+
+#     if filters.get("item_group"):
+#         conditions.append("sii.item_group = %(item_group)s")
+#         values["item_group"] = filters["item_group"]
+
+#     if filters.get("warehouse"):
+#         conditions.append("sii.warehouse = %(warehouse)s")
+#         values["warehouse"] = filters["warehouse"]
+
+#     if filters.get("project"):
+#         conditions.append("sii.project = %(project)s")
+#         values["project"] = filters["project"]
+
+#     if filters.get("invoice_type") == "Credit Note":
+#         conditions.append("si.is_return = 1")
+#     else:
+#         conditions.append("IFNULL(si.is_return, 0) = 0")
+
+#     if not filters.get("include_returned"):
+#         conditions.append("IFNULL(si.is_return, 0) = 0")
+
+#     where_clause = (" AND " + " AND ".join(conditions)) if conditions else ""
+
+#     query = f"""
+#         SELECT
+#             si.name                          AS invoice,
+#             si.customer,
+
+#             so_ref.sales_order               AS sales_order,
+#             po_ref.purchase_order            AS purchase_order,
+#             pi_ref.purchase_invoice          AS purchase_invoice,
+
+#             si.custom_country_of_origin      AS origin_country,
+#             si.custom_country_of_destination AS destination_country,
+#             si.custom_mode                   AS mode,
+
+#             si.custom_total_cbm              AS cbm,
+#             si.custom_total_weight           AS weight,
+#             si.custom_job_no                 AS job_no,
+
+#             SUM(sii.base_net_amount)         AS sell,
+
+#             IFNULL(si.custom_commission, 0)  AS commission
+
+#         FROM `tabSales Invoice` si
+
+#         LEFT JOIN `tabSales Invoice Item` sii
+#             ON sii.parent = si.name
+
+#         LEFT JOIN (
+#             SELECT parent AS invoice, MIN(sales_order) AS sales_order
+#             FROM `tabSales Invoice Item`
+#             WHERE sales_order IS NOT NULL AND sales_order != ''
+#             GROUP BY parent
+#         ) so_ref ON so_ref.invoice = si.name
+
+#         LEFT JOIN (
+#             SELECT sales_order, MIN(parent) AS purchase_order
+#             FROM `tabPurchase Order Item`
+#             WHERE sales_order IS NOT NULL AND sales_order != ''
+#             GROUP BY sales_order
+#         ) po_ref ON po_ref.sales_order = so_ref.sales_order
+
+#         LEFT JOIN (
+#             SELECT purchase_order, MIN(parent) AS purchase_invoice
+#             FROM `tabPurchase Invoice Item`
+#             WHERE purchase_order IS NOT NULL AND purchase_order != ''
+#             GROUP BY purchase_order
+#         ) pi_ref ON pi_ref.purchase_order = po_ref.purchase_order
+
+#         WHERE si.docstatus = 1
+#         {where_clause}
+#         GROUP BY si.name
+#         ORDER BY si.posting_date DESC
+#     """
+
+#     invoices = frappe.db.sql(query, values, as_dict=True)
+
+#     if not invoices:
+#         return []
+
+#     invoice_names   = [d.invoice          for d in invoices]
+#     pi_names        = [d.purchase_invoice  for d in invoices if d.purchase_invoice]
+#     placeholders_si = ", ".join(["%s"] * len(invoice_names))
+
+#     # ── Fetch SI items ─────────────────────────────────────────────────
+#     items = frappe.db.sql(f"""
+#         SELECT
+#             sii.parent          AS invoice,
+#             sii.item_code,
+#             sii.item_name,
+#             sii.qty,
+#             sii.uom,
+#             sii.rate,
+#             sii.base_net_amount AS amount,
+#             sii.item_group,
+#             sii.warehouse
+#         FROM `tabSales Invoice Item` sii
+#         WHERE sii.parent IN ({placeholders_si})
+#         ORDER BY sii.parent, sii.idx
+#     """, tuple(invoice_names), as_dict=True)
+
+#     # ── Fetch PI items: amount per (purchase_invoice, item_code) ──────
+#     pi_buy_map = {}
+#     if pi_names:
+#         placeholders_pi = ", ".join(["%s"] * len(pi_names))
+#         pi_items = frappe.db.sql(f"""
+#             SELECT
+#                 pii.parent    AS purchase_invoice,
+#                 pii.item_code,
+#                 pii.amount
+#             FROM `tabPurchase Invoice Item` pii
+#             WHERE pii.parent IN ({placeholders_pi})
+#             ORDER BY pii.parent, pii.idx
+#         """, tuple(pi_names), as_dict=True)
+
+#         for pi in pi_items:
+#             key = (pi.purchase_invoice, pi.item_code)
+#             pi_buy_map[key] = pi_buy_map.get(key, 0.0) + flt(pi.amount)
+
+#     # ── invoice → purchase_invoice lookup ─────────────────────────────
+#     inv_to_pi = {d.invoice: d.purchase_invoice for d in invoices}
+
+#     # ── item map grouped by invoice ───────────────────────────────────
+#     item_map = defaultdict(list)
+#     for item in items:
+#         item_map[item.invoice].append(item)
+
+#     # ── Calculate buy per invoice summing matched PI item amounts ──────
+#     inv_buy_map = {}
+#     for inv in invoices:
+#         pi_name = inv_to_pi.get(inv.invoice)
+#         if not pi_name:
+#             inv_buy_map[inv.invoice] = 0.0
+#             continue
+#         total_buy = 0.0
+#         for itm in item_map.get(inv.invoice, []):
+#             key = (pi_name, itm.item_code)
+#             total_buy += pi_buy_map.get(key, 0.0)
+#         inv_buy_map[inv.invoice] = total_buy
+
+#     # ── Attach calculated fields ───────────────────────────────────────
+#     for inv in invoices:
+#         buy        = flt(inv_buy_map.get(inv.invoice, 0))
+#         sell       = flt(inv.sell or 0)
+#         commission = flt(inv.commission or 0)
+
+#         inv["buy"]              = buy
+#         inv["gross_margin"]     = sell - buy
+#         inv["gross_percentage"] = ((sell - buy) / sell * 100) if sell else 0
+#         inv["net_margin"]       = sell - buy - commission
+
+#     # ── Total Based: parent rows only ─────────────────────────────────
+#     total_amount_view = filters.get("total_amount_view", "Invoice Based")
+#     if total_amount_view == "Total Based":
+#         for inv in invoices:
+#             inv["indent"] = 0
+#         return invoices
+
+#     # ── Invoice Based: expandable child item rows ──────────────────────
+#     result = []
+#     for inv in invoices:
+#         inv["indent"] = 0
+#         result.append(inv)
+
+#         pi_name = inv_to_pi.get(inv.invoice)
+
+#         for itm in item_map.get(inv.invoice, []):
+#             item_buy       = flt(pi_buy_map.get((pi_name, itm.item_code), 0)) if pi_name else 0.0
+#             item_sell      = flt(itm.amount or 0)
+#             item_gross     = item_sell - item_buy
+#             item_gross_pct = (item_gross / item_sell * 100) if item_sell else 0.0
+
+#             child = {
+#                 "indent":              1,
+#                 "invoice":             itm.item_name or itm.item_code,
+#                 "customer":            "",
+#                 "sales_order":         "",
+#                 "purchase_order":      "",
+#                 "purchase_invoice":    "",
+#                 "origin_country":      "",
+#                 "destination_country": "",
+#                 "mode":                "",
+#                 "cbm":                 None,
+#                 "weight":              None,
+#                 "job_no":              "",
+#                 "buy":                 item_buy,
+#                 "sell":                item_sell,
+#                 "gross_margin":        item_gross,
+#                 "gross_percentage":    item_gross_pct,
+#                 "commission":          0,
+#                 "net_margin":          item_gross,
+#             }
+#             result.append(child)
+
+#     return result
+
+
+
 import frappe
 from frappe.utils import flt
 from collections import defaultdict
@@ -818,12 +1074,13 @@ def get_data(filters):
     if not invoices:
         return []
 
-    invoice_names   = [d.invoice          for d in invoices]
-    pi_names        = [d.purchase_invoice  for d in invoices if d.purchase_invoice]
+    invoice_names = [d.invoice         for d in invoices]
+    pi_names      = [d.purchase_invoice for d in invoices if d.purchase_invoice]
+
     placeholders_si = ", ".join(["%s"] * len(invoice_names))
 
-    # ── Fetch SI items ─────────────────────────────────────────────────
-    items = frappe.db.sql(f"""
+    # ── Fetch SI items ─────────────────────────────────────────────────────────
+    si_items = frappe.db.sql(f"""
         SELECT
             sii.parent          AS invoice,
             sii.item_code,
@@ -839,14 +1096,20 @@ def get_data(filters):
         ORDER BY sii.parent, sii.idx
     """, tuple(invoice_names), as_dict=True)
 
-    # ── Fetch PI items: amount per (purchase_invoice, item_code) ──────
-    pi_buy_map = {}
+    # ── Fetch PI items: keyed by (pi_name, item_code) AND (pi_name, item_name) ─
+    #    This handles both cases:
+    #      - SI and PI share the same item_code  → matched by item_code
+    #      - SI and PI share the same item_name  → matched by item_name (fallback)
+    pi_buy_by_code = {}   # (purchase_invoice, item_code)  -> amount
+    pi_buy_by_name = {}   # (purchase_invoice, item_name)  -> amount
+
     if pi_names:
         placeholders_pi = ", ".join(["%s"] * len(pi_names))
         pi_items = frappe.db.sql(f"""
             SELECT
-                pii.parent    AS purchase_invoice,
+                pii.parent      AS purchase_invoice,
                 pii.item_code,
+                pii.item_name,
                 pii.amount
             FROM `tabPurchase Invoice Item` pii
             WHERE pii.parent IN ({placeholders_pi})
@@ -854,49 +1117,56 @@ def get_data(filters):
         """, tuple(pi_names), as_dict=True)
 
         for pi in pi_items:
-            key = (pi.purchase_invoice, pi.item_code)
-            pi_buy_map[key] = pi_buy_map.get(key, 0.0) + flt(pi.amount)
+            code_key = (pi.purchase_invoice, pi.item_code)
+            name_key = (pi.purchase_invoice, (pi.item_name or "").strip().upper())
+            pi_buy_by_code[code_key] = pi_buy_by_code.get(code_key, 0.0) + flt(pi.amount)
+            pi_buy_by_name[name_key] = pi_buy_by_name.get(name_key, 0.0) + flt(pi.amount)
 
-    # ── invoice → purchase_invoice lookup ─────────────────────────────
+    # ── invoice → purchase_invoice lookup ─────────────────────────────────────
     inv_to_pi = {d.invoice: d.purchase_invoice for d in invoices}
 
-    # ── item map grouped by invoice ───────────────────────────────────
+    # ── item map grouped by invoice ───────────────────────────────────────────
     item_map = defaultdict(list)
-    for item in items:
+    for item in si_items:
         item_map[item.invoice].append(item)
 
-    # ── Calculate buy per invoice summing matched PI item amounts ──────
-    inv_buy_map = {}
+    # ── Helper: get buy amount for a single SI item from PI ───────────────────
+    def get_item_buy(pi_name, item_code, item_name):
+        if not pi_name:
+            return 0.0
+        # 1st: match by item_code (most reliable)
+        val = pi_buy_by_code.get((pi_name, item_code), None)
+        if val is not None:
+            return val
+        # 2nd: match by item_name (case-insensitive) as fallback
+        val = pi_buy_by_name.get((pi_name, (item_name or "").strip().upper()), None)
+        if val is not None:
+            return val
+        return 0.0
+
+    # ── Calculate buy per invoice = sum of matched PI item amounts ────────────
     for inv in invoices:
         pi_name = inv_to_pi.get(inv.invoice)
-        if not pi_name:
-            inv_buy_map[inv.invoice] = 0.0
-            continue
-        total_buy = 0.0
-        for itm in item_map.get(inv.invoice, []):
-            key = (pi_name, itm.item_code)
-            total_buy += pi_buy_map.get(key, 0.0)
-        inv_buy_map[inv.invoice] = total_buy
-
-    # ── Attach calculated fields ───────────────────────────────────────
-    for inv in invoices:
-        buy        = flt(inv_buy_map.get(inv.invoice, 0))
+        total_buy = sum(
+            get_item_buy(pi_name, itm.item_code, itm.item_name)
+            for itm in item_map.get(inv.invoice, [])
+        )
         sell       = flt(inv.sell or 0)
         commission = flt(inv.commission or 0)
 
-        inv["buy"]              = buy
-        inv["gross_margin"]     = sell - buy
-        inv["gross_percentage"] = ((sell - buy) / sell * 100) if sell else 0
-        inv["net_margin"]       = sell - buy - commission
+        inv["buy"]              = total_buy
+        inv["gross_margin"]     = sell - total_buy
+        inv["gross_percentage"] = ((sell - total_buy) / sell * 100) if sell else 0
+        inv["net_margin"]       = sell - total_buy - commission
 
-    # ── Total Based: parent rows only ─────────────────────────────────
+    # ── Total Based: parent rows only ─────────────────────────────────────────
     total_amount_view = filters.get("total_amount_view", "Invoice Based")
     if total_amount_view == "Total Based":
         for inv in invoices:
             inv["indent"] = 0
         return invoices
 
-    # ── Invoice Based: expandable child item rows ──────────────────────
+    # ── Invoice Based: expandable child item rows ──────────────────────────────
     result = []
     for inv in invoices:
         inv["indent"] = 0
@@ -905,7 +1175,7 @@ def get_data(filters):
         pi_name = inv_to_pi.get(inv.invoice)
 
         for itm in item_map.get(inv.invoice, []):
-            item_buy       = flt(pi_buy_map.get((pi_name, itm.item_code), 0)) if pi_name else 0.0
+            item_buy       = get_item_buy(pi_name, itm.item_code, itm.item_name)
             item_sell      = flt(itm.amount or 0)
             item_gross     = item_sell - item_buy
             item_gross_pct = (item_gross / item_sell * 100) if item_sell else 0.0
@@ -923,7 +1193,7 @@ def get_data(filters):
                 "cbm":                 None,
                 "weight":              None,
                 "job_no":              "",
-                "buy":                 item_buy,
+                "buy":                 item_buy,      # ← PI item amount for this item
                 "sell":                item_sell,
                 "gross_margin":        item_gross,
                 "gross_percentage":    item_gross_pct,
