@@ -1016,7 +1016,6 @@ def get_data(filters):
 
     where_clause = (" AND " + " AND ".join(conditions)) if conditions else ""
 
-    # ── Main query: SI header + linked PO/PI references ───────────────────────
     query = f"""
         SELECT
             si.name                          AS invoice,
@@ -1074,70 +1073,99 @@ def get_data(filters):
     if not invoices:
         return []
 
-    # ── Collect unique Purchase Invoice names ──────────────────────────────────
-    pi_names = list({d.purchase_invoice for d in invoices if d.purchase_invoice})
+    # ── Collect all job_no values (= sales_order on PO item) ──────────
+    job_nos = [d.job_no for d in invoices if d.job_no]
 
-    # ── Fetch PI items in order ────────────────────────────────────────────────
-    # pi_item_map[purchase_invoice] = [row1, row2, ...] sorted by idx
-    pi_item_map = defaultdict(list)
+    invoice_names   = [d.invoice for d in invoices]
+    placeholders_si = ", ".join(["%s"] * len(invoice_names))
 
-    if pi_names:
-        placeholders_pi = ", ".join(["%s"] * len(pi_names))
-        pi_items = frappe.db.sql(f"""
+    # ── Fetch SI items ─────────────────────────────────────────────────
+    items = frappe.db.sql(f"""
+        SELECT
+            sii.parent          AS invoice,
+            sii.item_code,
+            sii.item_name,
+            sii.qty,
+            sii.uom,
+            sii.rate,
+            sii.base_net_amount AS amount,
+            sii.item_group,
+            sii.warehouse
+        FROM `tabSales Invoice Item` sii
+        WHERE sii.parent IN ({placeholders_si})
+        ORDER BY sii.parent, sii.idx
+    """, tuple(invoice_names), as_dict=True)
+
+    # ── Fetch PO items matched by sales_order = job_no ────────────────
+    # key: sales_order (job_no) → amount
+    po_buy_map = {}
+    if job_nos:
+        placeholders_jo = ", ".join(["%s"] * len(job_nos))
+        po_items = frappe.db.sql(f"""
             SELECT
-                pii.parent      AS purchase_invoice,
-                pii.item_code,
-                pii.item_name,
-                pii.qty,
-                pii.rate,
-                pii.amount,
-                pii.idx
-            FROM `tabPurchase Invoice Item` pii
-            WHERE pii.parent IN ({placeholders_pi})
-            ORDER BY pii.parent, pii.idx
-        """, tuple(pi_names), as_dict=True)
+                poi.sales_order,
+                poi.amount
+            FROM `tabPurchase Order Item` poi
+            WHERE poi.sales_order IN ({placeholders_jo})
+              AND poi.docstatus != 2
+        """, tuple(job_nos), as_dict=True)
 
-        for pi in pi_items:
-            pi_item_map[pi.purchase_invoice].append(pi)
+        for poi in po_items:
+            so = poi.sales_order
+            # accumulate in case multiple PO item rows share same sales_order
+            po_buy_map[so] = po_buy_map.get(so, 0.0) + flt(poi.amount)
 
-    # ── inv → purchase_invoice lookup ─────────────────────────────────────────
-    inv_to_pi = {d.invoice: d.purchase_invoice for d in invoices}
+    # ── item map grouped by invoice ───────────────────────────────────
+    item_map = defaultdict(list)
+    for item in items:
+        item_map[item.invoice].append(item)
 
-    # ── Attach buy / gross / net on parent invoice rows ───────────────────────
+    # ── Attach buy per invoice using job_no → PO item amount ──────────
     for inv in invoices:
-        pi_name    = inv_to_pi.get(inv.invoice)
-        pi_rows    = pi_item_map.get(pi_name, []) if pi_name else []
-        total_buy  = sum(flt(r.amount) for r in pi_rows)
+        job_no     = inv.job_no or ""
+        buy        = flt(po_buy_map.get(job_no, 0))
         sell       = flt(inv.sell or 0)
         commission = flt(inv.commission or 0)
 
-        inv["buy"]              = total_buy
-        inv["gross_margin"]     = sell - total_buy
-        inv["gross_percentage"] = ((sell - total_buy) / sell * 100) if sell else 0
-        inv["net_margin"]       = sell - total_buy - commission
+        inv["buy"]              = buy
+        inv["gross_margin"]     = sell - buy
+        inv["gross_percentage"] = ((sell - buy) / sell * 100) if sell else 0
+        inv["net_margin"]       = sell - buy - commission
 
-    # ── Total Based: parent rows only ─────────────────────────────────────────
+    # ── Total Based: parent rows only ─────────────────────────────────
     total_amount_view = filters.get("total_amount_view", "Invoice Based")
     if total_amount_view == "Total Based":
         for inv in invoices:
             inv["indent"] = 0
         return invoices
 
-    # ── Invoice Based: child rows = PI items directly ─────────────────────────
+    # ── Invoice Based: expandable child item rows ──────────────────────
     result = []
     for inv in invoices:
         inv["indent"] = 0
         result.append(inv)
 
-        pi_name = inv_to_pi.get(inv.invoice)
-        pi_rows = pi_item_map.get(pi_name, []) if pi_name else []
+        job_no  = inv.job_no or ""
+        # for child rows buy is the same matched amount (one job_no per invoice)
+        item_buy_total = flt(po_buy_map.get(job_no, 0))
+        inv_items      = item_map.get(inv.invoice, [])
+        item_count     = len(inv_items) or 1
 
-        for pi_row in pi_rows:
-            item_buy = flt(pi_row.amount)
+        for itm in inv_items:
+            item_sell      = flt(itm.amount or 0)
+            # distribute buy proportionally across items by their sell share
+            inv_sell       = flt(inv.sell or 0)
+            if inv_sell:
+                item_buy = item_buy_total * (item_sell / inv_sell)
+            else:
+                item_buy = item_buy_total / item_count
+
+            item_gross     = item_sell - item_buy
+            item_gross_pct = (item_gross / item_sell * 100) if item_sell else 0.0
 
             child = {
                 "indent":              1,
-                "invoice":             pi_row.item_name or pi_row.item_code,
+                "invoice":             itm.item_name or itm.item_code,
                 "customer":            "",
                 "sales_order":         "",
                 "purchase_order":      "",
@@ -1148,12 +1176,12 @@ def get_data(filters):
                 "cbm":                 None,
                 "weight":              None,
                 "job_no":              "",
-                "buy":                 item_buy,  # ← PI item amount directly
-                "sell":                0.0,
-                "gross_margin":        0.0,
-                "gross_percentage":    0.0,
+                "buy":                 item_buy,
+                "sell":                item_sell,
+                "gross_margin":        item_gross,
+                "gross_percentage":    item_gross_pct,
                 "commission":          0,
-                "net_margin":          0.0,
+                "net_margin":          item_gross,
             }
             result.append(child)
 
