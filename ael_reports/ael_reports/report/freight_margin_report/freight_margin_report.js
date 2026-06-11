@@ -1,6 +1,7 @@
-// frappe.query_reports["Freight Margin Report"] = { 
 
-//     filters: [ 
+// frappe.query_reports["Freight Margin Report"] = {
+
+//     filters: [
 //         {
 //             fieldname: "company",
 //             label: "Company",
@@ -29,6 +30,13 @@
 //             fieldtype: "Select",
 //             options: ["Invoice", "Credit Note"],
 //             default: "Invoice"
+//         },
+//         {
+//             fieldname: "total_amount_view",
+//             label: "Total Amount",
+//             fieldtype: "Select",
+//             options: ["Invoice Based", "Total Based"],
+//             default: "Total Based"
 //         },
 //         {
 //             fieldname: "customer",
@@ -107,7 +115,7 @@
 //                        onclick="event.stopPropagation()">
 //                        ${data.invoice}
 //                    </a>`;
-//         }
+//         }9898
 
 //         if (column.fieldname === "sales_order" && data && data.sales_order) {
 //             return `<a href="/app/sales-order/${encodeURIComponent(data.sales_order)}"
@@ -133,12 +141,13 @@
 //         return value;
 //     },
 
-//          get_datatable_options: function (options) {
-//             options.treeView = true;
-//             options.initialDepth = 0;
-//             return options;
-//         }
-//     };
+//     get_datatable_options: function (options) {
+//         options.treeView = true;
+//         options.initialDepth = 0;
+//         return options;
+//     }
+// };
+
 
 
 
@@ -237,17 +246,14 @@ frappe.query_reports["Freight Margin Report"] = {
         ]);
 
         if (data && data.indent === 1) {
-
             if (column.fieldname === "invoice") {
                 return `<span style="color:var(--text-muted);font-size:0.92em;padding-left:4px;">
                             ${data.invoice || ""}
                         </span>`;
             }
-
             if (BLANK_ON_CHILD.has(column.fieldname)) {
                 return "";
             }
-
             return `<span style="color:var(--text-muted);font-size:0.92em;">
                         ${value || ""}
                     </span>`;
@@ -259,7 +265,7 @@ frappe.query_reports["Freight Margin Report"] = {
                        onclick="event.stopPropagation()">
                        ${data.invoice}
                    </a>`;
-        }9898
+        }
 
         if (column.fieldname === "sales_order" && data && data.sales_order) {
             return `<a href="/app/sales-order/${encodeURIComponent(data.sales_order)}"
@@ -291,6 +297,5 @@ frappe.query_reports["Freight Margin Report"] = {
         return options;
     }
 };
-
 
 
