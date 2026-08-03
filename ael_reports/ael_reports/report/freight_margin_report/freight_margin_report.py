@@ -1146,7 +1146,6 @@
 #         result.append(child)
 
 
-
 import frappe
 from frappe.utils import flt
 from collections import defaultdict
@@ -1414,7 +1413,8 @@ def get_data(filters):
         item_map[item.invoice].append(item)
 
     # ── Pre-calculate gross_margin_total per invoice ───────────────────
-    # sum of (sell - buy) across ALL non-cancelled PO rows for that invoice
+    # SELL (once) minus each BUY, one by one:
+    # gross_margin_total = sell - buy1 - buy2 - buy3 - ...
     inv_gross_total = {}
     for inv in invoices:
         job_no = inv.job_no or ""
@@ -1440,12 +1440,12 @@ def get_data(filters):
         if not po_list:
             inv_gross_total[inv.invoice] = sell
         else:
-            total_gm = 0.0
+            gm_total = sell   # start with SELL
             for po_name in po_list:
                 so_name = po_to_so_name.get(po_name, job_no)
                 buy     = flt(po_buy_map.get((so_name, po_name), 0))
-                total_gm += sell - buy
-            inv_gross_total[inv.invoice] = total_gm
+                gm_total -= buy   # subtract each BUY one by one
+            inv_gross_total[inv.invoice] = gm_total
 
     # ── Build result ───────────────────────────────────────────────────
     total_amount_view = filters.get("total_amount_view", "Invoice Based")
@@ -1474,9 +1474,9 @@ def get_data(filters):
                     po_to_so_name[po_name] = direct_so
 
         # gross_margin_total is same for all PO rows of this invoice
-        gm_total = flt(inv_gross_total.get(inv.invoice, 0))
-        gross_pct     = (gm_total / sell * 100) if sell else 0
-        net_margin    = gm_total - commission
+        gm_total   = flt(inv_gross_total.get(inv.invoice, 0))
+        gross_pct  = (gm_total / sell * 100) if sell else 0
+        net_margin = gm_total - commission
 
         if not po_list:
             inv_row = dict(inv)
