@@ -831,7 +831,6 @@
 
 
 
-
 from __future__ import unicode_literals
 
 import json
@@ -890,26 +889,26 @@ def get_columns():
         },
         {
             "fieldname": "voucher_type",
-            "label": _("Voucher Type"),
+            "label": _("Voucher type"),
             "fieldtype": "Data",
             "width": 140,
         },
         {
             "fieldname": "voucher_no",
-            "label": _("Voucher No."),
+            "label": _("Voucher no."),
             "fieldtype": "Link",
             "options": "Purchase Invoice",
             "width": 180,
         },
         {
             "fieldname": "voucher_ref_no",
-            "label": _("Voucher Ref. No."),
+            "label": _("Voucher ref. no."),
             "fieldtype": "Data",
             "width": 170,
         },
         {
             "fieldname": "gross_total",
-            "label": _("Gross Total"),
+            "label": _("Gross total"),
             "fieldtype": "Currency",
             "width": 120,
         },
@@ -921,37 +920,37 @@ def get_columns():
         },
         {
             "fieldname": "input_cgst_9",
-            "label": _("INPUT CGST 9%"),
+            "label": _("Input cgst 9%"),
             "fieldtype": "Currency",
             "width": 125,
         },
         {
             "fieldname": "input_sgst_9",
-            "label": _("INPUT SGST 9%"),
+            "label": _("Input sgst 9%"),
             "fieldtype": "Currency",
             "width": 125,
         },
         {
             "fieldname": "tds_2",
-            "label": _("94 C Tds Payable 2%"),
+            "label": _("94 C tds payable 2%"),
             "fieldtype": "Currency",
             "width": 145,
         },
         {
             "fieldname": "purchase_non_taxable",
-            "label": _("Purchase Non Taxable"),
+            "label": _("Purchase non taxable"),
             "fieldtype": "Currency",
             "width": 150,
         },
         {
             "fieldname": "input_igst_18",
-            "label": _("INPUT IGST 18%"),
+            "label": _("Input igst 18%"),
             "fieldtype": "Currency",
             "width": 125,
         },
         {
             "fieldname": "round_off",
-            "label": _("Round Off"),
+            "label": _("Round off"),
             "fieldtype": "Currency",
             "width": 100,
         },
@@ -963,19 +962,19 @@ def get_columns():
         },
         {
             "fieldname": "input_cgst_2_5",
-            "label": _("INPUT CGST 2.5%"),
+            "label": _("Input cgst 2.5%"),
             "fieldtype": "Currency",
             "width": 135,
         },
         {
             "fieldname": "input_sgst_2_5",
-            "label": _("Input Sgst 2.5%"),
+            "label": _("Input sgst 2.5%"),
             "fieldtype": "Currency",
             "width": 135,
         },
         {
             "fieldname": "tds_1",
-            "label": _("94 C Tds Payable 1%"),
+            "label": _("94 C tds payable 1%"),
             "fieldtype": "Currency",
             "width": 145,
         },
@@ -1080,8 +1079,6 @@ def get_data(filters):
 
     # --------------------------------------------------------------
     # Purchase Invoice Items
-    #
-    # We use the ITEM table for Purchase Non Taxable.
     # --------------------------------------------------------------
 
     items = frappe.db.sql(
@@ -1148,7 +1145,7 @@ def calculate_invoice(invoice, taxes, items):
     tds_1 = 0
 
     # --------------------------------------------------------------
-    # GST AMOUNTS
+    # PROCESS TAX ROWS
     # --------------------------------------------------------------
 
     for tax in taxes:
@@ -1169,14 +1166,6 @@ def calculate_invoice(invoice, taxes, items):
 
         # ==========================================================
         # TDS
-        #
-        # IMPORTANT:
-        # The TDS tax row can show Tax Rate = 0.
-        #
-        # We therefore DO NOT depend on tax.rate for the TDS amount.
-        #
-        # The actual amount comes from:
-        # tax_amount_after_discount_amount / tax_amount
         # ==========================================================
 
         if is_tds_row(tax):
@@ -1185,8 +1174,6 @@ def calculate_invoice(invoice, taxes, items):
                 invoice.posting_date,
             )
 
-            # If category rate is not available,
-            # fall back to tax row rate.
             if not tds_rate:
                 tds_rate = abs(rate)
 
@@ -1256,43 +1243,29 @@ def calculate_invoice(invoice, taxes, items):
     # ==============================================================
     # PURCHASE 18%
     #
-    # USER REQUIREMENT:
-    #
-    # Purchase 18% = CGST 9% + SGST 9%
-    #
-    # Example:
-    # CGST = 511.65
-    # SGST = 511.65
-    # Purchase 18% = 1,023.30
+    # CGST 9% + SGST 9%
     # ==============================================================
 
-    purchase_18 = input_cgst_9 + input_sgst_9
+    purchase_18 = (
+        input_cgst_9
+        + input_sgst_9
+    )
 
     # ==============================================================
     # PURCHASE 5%
     #
-    # Purchase 5% = CGST 2.5% + SGST 2.5%
+    # CGST 2.5% + SGST 2.5%
     # ==============================================================
 
-    purchase_5 = input_cgst_2_5 + input_sgst_2_5
+    purchase_5 = (
+        input_cgst_2_5
+        + input_sgst_2_5
+    )
 
     # ==============================================================
     # PURCHASE NON TAXABLE
     #
-    # IMPORTANT:
-    #
-    # DO NOT calculate:
-    # Net Total - GST taxable base
-    #
-    # Instead:
-    # Go through Purchase Invoice Item table.
-    #
-    # If an item has:
-    #   - GST rate 0
-    #   - no GST
-    #   - exempted / nil-rated / zero-rated tax
-    #
-    # its item value is added to Purchase Non Taxable.
+    # Item values having 0% / exempt / non-taxable GST
     # ==============================================================
 
     purchase_non_taxable = get_purchase_non_taxable(
@@ -1325,11 +1298,15 @@ def calculate_invoice(invoice, taxes, items):
 
         "tds_2": flt(tds_2),
 
-        "purchase_non_taxable": flt(purchase_non_taxable),
+        "purchase_non_taxable": flt(
+            purchase_non_taxable
+        ),
 
         "input_igst_18": flt(input_igst_18),
 
-        "round_off": flt(invoice.rounding_adjustment),
+        "round_off": flt(
+            invoice.rounding_adjustment
+        ),
 
         "purchase_5": flt(purchase_5),
 
@@ -1346,8 +1323,13 @@ def calculate_invoice(invoice, taxes, items):
 # ======================================================================
 
 def is_tds_row(tax):
-    account_head = (tax.account_head or "").lower()
-    description = (tax.description or "").lower()
+    account_head = (
+        tax.account_head or ""
+    ).lower()
+
+    description = (
+        tax.description or ""
+    ).lower()
 
     return bool(
         cint(tax.is_tax_withholding_account)
@@ -1362,7 +1344,10 @@ def is_tds_row(tax):
 # TDS CATEGORY RATE
 # ======================================================================
 
-def get_tds_category_rate(category_name, posting_date):
+def get_tds_category_rate(
+    category_name,
+    posting_date
+):
     if not category_name:
         return 0
 
@@ -1405,7 +1390,9 @@ def get_tds_category_rate(category_name, posting_date):
 # ======================================================================
 
 def get_tax_amount(tax):
-    value = tax.get("tax_amount_after_discount_amount")
+    value = tax.get(
+        "tax_amount_after_discount_amount"
+    )
 
     if value is not None:
         return flt(value)
@@ -1422,17 +1409,13 @@ def get_tax_amount(tax):
 # PURCHASE NON TAXABLE
 # ======================================================================
 
-def get_purchase_non_taxable(items, taxes):
+def get_purchase_non_taxable(
+    items,
+    taxes
+):
     """
-    Calculate Purchase Non Taxable from Purchase Invoice Items.
-
-    An item's value is included when the item has:
-        - GST rate 0
-        - no GST
-        - exempted / nil rated / zero rated tax
-
-    Item value is taken from base_amount so that the report
-    remains in company currency.
+    Purchase Non Taxable is the total value of invoice items
+    which have 0%, exempted, nil-rated, zero-rated or no GST.
     """
 
     if not items:
@@ -1440,13 +1423,20 @@ def get_purchase_non_taxable(items, taxes):
 
     item_gst_rates = get_item_gst_rates(taxes)
 
-    # Check whether invoice has actual GST tax rows.
     has_gst_rows = False
 
     for tax in taxes:
-        account_head = (tax.account_head or "").lower()
-        description = (tax.description or "").lower()
-        gst_tax_type = (tax.gst_tax_type or "").lower()
+        account_head = (
+            tax.account_head or ""
+        ).lower()
+
+        description = (
+            tax.description or ""
+        ).lower()
+
+        gst_tax_type = (
+            tax.gst_tax_type or ""
+        ).lower()
 
         tax_text = (
             account_head
@@ -1461,66 +1451,77 @@ def get_purchase_non_taxable(items, taxes):
             or "sgst" in tax_text
             or "igst" in tax_text
         ):
-            if flt(tax.rate) > 0 or tax.get("item_wise_tax_detail"):
+            if (
+                flt(tax.rate) > 0
+                or tax.get("item_wise_tax_detail")
+            ):
                 has_gst_rows = True
                 break
 
     total_non_taxable = 0
 
     for item in items:
-        item_code = (item.item_code or "").strip()
+        item_code = (
+            item.item_code or ""
+        ).strip()
 
-        item_value = item.get("base_amount")
+        item_value = item.get(
+            "base_amount"
+        )
 
         if item_value is None:
-            item_value = item.get("amount")
+            item_value = item.get(
+                "amount"
+            )
 
         item_value = flt(item_value)
 
         if not item_value:
             continue
 
-        rates = item_gst_rates.get(item_code)
+        rates = item_gst_rates.get(
+            item_code
+        )
 
         # ----------------------------------------------------------
-        # Case 1:
-        # Item has item-wise GST information.
-        #
-        # If all GST rates are 0, item is non-taxable/exempted.
+        # Item-wise GST information available
         # ----------------------------------------------------------
 
         if rates is not None:
-            if not rates or all(
-                nearly_equal(rate, 0)
-                for rate in rates
+            if (
+                not rates
+                or all(
+                    nearly_equal(
+                        rate,
+                        0
+                    )
+                    for rate in rates
+                )
             ):
                 total_non_taxable += item_value
 
             continue
 
         # ----------------------------------------------------------
-        # Case 2:
-        # No item-wise GST information.
-        #
-        # Check Item Tax Template.
+        # Item Tax Template
         # ----------------------------------------------------------
 
-        template = (item.item_tax_template or "").strip()
+        template = (
+            item.item_tax_template or ""
+        ).strip()
 
         if template:
             template_text = template.lower()
 
-            if is_exempt_or_zero_tax_template(template_text):
+            if is_exempt_or_zero_tax_template(
+                template_text
+            ):
                 total_non_taxable += item_value
 
             continue
 
         # ----------------------------------------------------------
-        # Case 3:
-        # No item tax template and no item-wise tax detail.
-        #
-        # If invoice itself has no GST rows, consider the item
-        # non-taxable.
+        # No GST information
         # ----------------------------------------------------------
 
         if not has_gst_rows:
@@ -1534,18 +1535,20 @@ def get_purchase_non_taxable(items, taxes):
 # ======================================================================
 
 def get_item_gst_rates(taxes):
-    """
-    Read item_wise_tax_detail from Purchase Taxes and Charges.
-
-    ERPNext stores item-wise tax details against the GST tax rows.
-    """
-
     item_gst_rates = {}
 
     for tax in taxes:
-        account_head = (tax.account_head or "").lower()
-        description = (tax.description or "").lower()
-        gst_tax_type = (tax.gst_tax_type or "").lower()
+        account_head = (
+            tax.account_head or ""
+        ).lower()
+
+        description = (
+            tax.description or ""
+        ).lower()
+
+        gst_tax_type = (
+            tax.gst_tax_type or ""
+        ).lower()
 
         tax_text = (
             account_head
@@ -1562,33 +1565,54 @@ def get_item_gst_rates(taxes):
         ):
             continue
 
-        raw_detail = tax.get("item_wise_tax_detail")
+        raw_detail = tax.get(
+            "item_wise_tax_detail"
+        )
 
         if not raw_detail:
             continue
 
         try:
-            if isinstance(raw_detail, str):
-                details = json.loads(raw_detail)
+            if isinstance(
+                raw_detail,
+                str
+            ):
+                details = json.loads(
+                    raw_detail
+                )
             else:
                 details = raw_detail
+
         except Exception:
             continue
 
-        if not isinstance(details, dict):
+        if not isinstance(
+            details,
+            dict
+        ):
             continue
 
         for item_code, detail in details.items():
             rate = 0
 
-            if isinstance(detail, (list, tuple)):
+            if isinstance(
+                detail,
+                (list, tuple)
+            ):
                 if len(detail) > 0:
-                    rate = flt(detail[0])
+                    rate = flt(
+                        detail[0]
+                    )
 
-            elif isinstance(detail, dict):
+            elif isinstance(
+                detail,
+                dict
+            ):
                 rate = flt(
                     detail.get("rate")
-                    or detail.get("tax_rate")
+                    or detail.get(
+                        "tax_rate"
+                    )
                 )
 
             item_gst_rates.setdefault(
@@ -1603,7 +1627,9 @@ def get_item_gst_rates(taxes):
 # EXEMPT / ZERO TAX TEMPLATE
 # ======================================================================
 
-def is_exempt_or_zero_tax_template(template_text):
+def is_exempt_or_zero_tax_template(
+    template_text
+):
     keywords = [
         "exempt",
         "exempted",
@@ -1653,7 +1679,9 @@ def get_total_row(data):
 
     for fieldname in numeric_fields:
         total_row[fieldname] = sum(
-            flt(row.get(fieldname))
+            flt(
+                row.get(fieldname)
+            )
             for row in data
         )
 
@@ -1664,15 +1692,24 @@ def get_total_row(data):
 # HELPERS
 # ======================================================================
 
-def nearly_equal(value1, value2, tolerance=0.0001):
+def nearly_equal(
+    value1,
+    value2,
+    tolerance=0.0001
+):
     return abs(
-        flt(value1) - flt(value2)
+        flt(value1)
+        - flt(value2)
     ) <= tolerance
 
 
 def flt(value):
-    return frappe.utils.flt(value)
+    return frappe.utils.flt(
+        value
+    )
 
 
 def cint(value):
-    return frappe.utils.cint(value)
+    return frappe.utils.cint(
+        value
+    )
